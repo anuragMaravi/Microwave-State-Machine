@@ -3,6 +3,8 @@ import http.requests.*;
 import java.sql.Timestamp;
 import java.util.Date;
 import java.text.SimpleDateFormat;
+import java.util.Timer;
+
 
 import com.rabbitmq.client.*;
 import java.io.IOException;
@@ -14,11 +16,15 @@ color a, b, c, d, e;
 color active = color(164, 223, 254);
 color inactive = color(107, 128, 194);
 boolean inUse = false, finished = false, interrupted = false, doorAjar = false, available = false; 
-Client myClient;
 String dataIn = "";
 
+//Timer
+long timeEnd_mr = 0;
+long timeStart_mr =0;
+boolean started_mr = false;
+long eventDelay = 2000; //If event changes is not changed for 3 seconds, keep state active.
 
-void setup(){
+void setup(){  
   size(1280, 720);
   noLoop();  
   
@@ -26,8 +32,8 @@ void setup(){
   //Data from RabbitMQ
   try{
     ConnectionFactory factory = new ConnectionFactory();
-    factory.setUsername("");
-    factory.setPassword("");
+    factory.setUsername("test");
+    factory.setPassword("TeSt");
     factory.setVirtualHost("/");
     factory.setHost("128.237.158.26");
     factory.setPort(5672);
@@ -61,17 +67,26 @@ void setup(){
   
 }
 int i = 0;
-//void draw(){}
 void draw(){
   background(0);
-  a = b = c = d = e = inactive;
+  
+  //Timestamp timestamp = new Timestamp(System.currentTimeMillis());
+  //int time_now = Integer.parseInt(String.valueOf(timestamp.getTime()).substring(0, 10));
+  //println("TimeNow: " + millis());
+  
+  Timer timer = new Timer();
+  
+    a = b = c = d = e = inactive;
   
   //*************************
-  
+  long eventTime = 0;
   if(message.length() != 0){
     JSONObject json = parseJSONObject(message);
     JSONObject fields = json.getJSONObject("fields");
     message = fields.getString("value");
+    String dateD = String.valueOf(json.getString("time"));
+    eventTime = parseTime(dateD); //Time in GMT
+    //println(eventTime);
   } else println("No new data");
   dataIn = message;
   
@@ -88,10 +103,25 @@ void draw(){
   //Smoothen the data
   //Use the code from typing project V4
   
+  
+  
   //Conditions for state change
-  if(dataIn.equals("START:Microwave Running")){
-    resetStates();
-    inUse = true;
+  if(dataIn.equals("START:Microwave Running") || dataIn.equals("END:Microwave Running")){
+    if(dataIn.equals("START:Microwave Running")){
+        started_mr = true;
+        timeStart_mr = eventTime;
+        resetStates();
+        inUse = true;
+      }
+      if(dataIn.equals("END:Microwave Running") && started_mr){
+        timeEnd_mr = eventTime; 
+      }
+      //smooth data when time delay should not be more than eventDelay
+      if(timeStart_mr - timeEnd_mr > eventDelay){
+        inUse = false;
+        timeEnd_mr = 0;
+        timeStart_mr = 0;
+      }
   }
   if(dataIn.equals("START:Chime")){
     resetStates();
@@ -102,9 +132,10 @@ void draw(){
    interrupted = true;   
  }
  if(!inUse&&dataIn.equals("START:Door Open")){
+   resetStates();
    doorAjar = true;
  }
- if(doorAjar&&dataIn.equals("START:Door Close")){
+ if(dataIn.equals("START:Door Close")){
    resetStates();
    available = true;
  }
@@ -188,7 +219,7 @@ void draw(){
   
   textSize(32);
   fill(0);
-  text("Closed", 415, 312);
+  text("Door Closed", 385, 312);
   
   textSize(32);
   fill(0);
@@ -201,7 +232,9 @@ void draw(){
   textSize(32);
   fill(0);
   text("Finished", 580, 567);
-}
+  
+  
+} //Draw ends here
 
 
 void resetUI(){
@@ -219,4 +252,22 @@ void drawArrow(int cx, int cy, int len, float angle){
   line(len, 0, len - 8, -8);
   line(len, 0, len - 8, 8);
   popMatrix();
+}
+
+//Parse time from string and change it to unix timestamp
+public long parseTime(String date){
+  String[] arrOfStr = date.split("T|Z");
+  String dat = arrOfStr[0] + " " + arrOfStr[1];
+  String timestamp_data = "0";
+  SimpleDateFormat datetimeFormatter1 = new SimpleDateFormat("yyyy-MM-dd hh:mm:ss");
+  try {
+    Date lFromDate1 = datetimeFormatter1.parse(dat);
+    Timestamp fromTS1 = new Timestamp(lFromDate1.getTime());
+
+    timestamp_data = String.valueOf(fromTS1.getTime());
+  }catch (java.text.ParseException e) {
+    e.printStackTrace();
+  }
+  return Long.parseLong(String.valueOf(timestamp_data)) - 14400000;
+  //return Integer.parseInt(String.valueOf(timestamp_data).substring(0, 10));
 }
